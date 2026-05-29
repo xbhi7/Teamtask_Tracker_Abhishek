@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.env
+.env.production
+.env.development
+.env.local
+.prisma/
+.next/
+coverage/
+.DS_Store
