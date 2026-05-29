@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from './Toast';
-import { Mail, Key, User, PlusCircle, LogIn, ClipboardList, ShieldAlert, ArrowRight } from 'lucide-react';
+import { Mail, Key, PlusCircle, LogIn, ClipboardList, ShieldAlert, ArrowRight } from 'lucide-react';
 
 export const LoginScreen: React.FC = () => {
   const { login, register } = useAuth();

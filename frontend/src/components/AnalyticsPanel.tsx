@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from './Toast';
-import { BarChart3, TrendingUp, AlertTriangle, Clock, ShieldAlert, Award, UserCheck } from 'lucide-react';
+import { BarChart3, AlertTriangle, Clock, Award } from 'lucide-react';
 
 interface UserAnalytics {
   userId: string;

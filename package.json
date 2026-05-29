@@ -1,0 +1,8 @@
+{
+  "name": "team-task-tracker-monorepo",
+  "version": "1.0.0",
+  "description": "TeamTask Tracker monorepo orchestrator for local development",
+  "scripts": {
+    "dev": "npm run dev --prefix backend & npm run dev --prefix frontend"
+  }
+}

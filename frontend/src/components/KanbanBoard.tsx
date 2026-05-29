@@ -3,8 +3,7 @@ import { useAuth } from '../context/AuthContext';
 import { useToast } from './Toast';
 import { 
   Search, Filter, Plus, User2, Calendar, ClipboardList,
-  Play, CheckCircle2, RotateCcw, AlertOctagon, HelpCircle,
-  TrendingUp, UserCheck, AlertTriangle
+  Play, CheckCircle2, AlertOctagon, HelpCircle, UserCheck
 } from 'lucide-react';
 
 interface Member {
@@ -53,7 +52,6 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({ onOpenTaskModal, refre
 
   const [tasks, setTasks] = useState<Task[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
-  const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [cacheIndicator, setCacheIndicator] = useState<boolean>(false);
 
@@ -65,21 +63,16 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({ onOpenTaskModal, refre
   // Dragging highlights
   const [activeDragCol, setActiveDragCol] = useState<string | null>(null);
 
-  // Fetch projects and members for dropdowns
+  // Fetch members for assignee dropdown filter
   const fetchAuxiliaryData = useCallback(async () => {
     try {
-      const [membersRes, projectsRes] = await Promise.all([
-        apiFetch('/projects/members'),
-        apiFetch('/projects'),
-      ]);
-      if (membersRes.ok && projectsRes.ok) {
-        const membersData = await membersRes.json();
-        const projectsData = await projectsRes.json();
+      const res = await apiFetch('/projects/members');
+      if (res.ok) {
+        const membersData = await res.json();
         setMembers(membersData);
-        setProjects(projectsData);
       }
     } catch (err) {
-      console.error('⚠️ Failed to load members or projects:', err);
+      console.error('⚠️ Failed to load members:', err);
     }
   }, [apiFetch]);
 
@@ -378,7 +371,6 @@ const TaskCard: React.FC<{
   onDragStart: (e: React.DragEvent) => void;
   glowClass: string;
 }> = ({ task, onCardClick, onDragStart, glowClass }) => {
-  const { user } = useAuth();
   
   const priorityColors = {
     LOW: 'bg-green-500/10 text-green-400 border-green-500/20',

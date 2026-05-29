@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from './Toast';
-import { UserPlus, Users, User, ShieldAlert, Mail, ShieldCheck, Key } from 'lucide-react';
+import { UserPlus, Users, ShieldAlert, Mail, Key } from 'lucide-react';
 
 interface Member {
   id: string;

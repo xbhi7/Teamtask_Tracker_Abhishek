@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from './Toast';
-import { X, Calendar, AlertCircle, Trash2, Save, User2, AlignLeft, ShieldCheck, AlertOctagon, HelpCircle } from 'lucide-react';
+import { X, Calendar, Trash2, Save, ShieldCheck } from 'lucide-react';
 
 interface Member {
   id: string;

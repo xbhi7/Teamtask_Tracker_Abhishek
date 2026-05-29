@@ -85,6 +85,20 @@ export const listTasks = async (req: Request, res: Response, next: NextFunction)
 
   const skip = (page - 1) * limit;
 
+  const whereClause: any = {
+    organizationId: currentUser.organizationId,
+  };
+
+  if (assigneeId) {
+    whereClause.assigneeId = assigneeId;
+  }
+  if (status) {
+    whereClause.status = status;
+  }
+  if (priority) {
+    whereClause.priority = priority;
+  }
+
   try {
     // Base assignee queries (limit=100, page=1, no filters) are cache targets for the Kanban board
     const isBaseAssigneeQuery = assigneeId && !status && !priority && page === 1 && limit === 100;
