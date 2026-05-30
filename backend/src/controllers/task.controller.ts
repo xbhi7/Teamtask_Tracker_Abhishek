@@ -10,13 +10,13 @@ export const createTask = async (req: Request, res: Response, next: NextFunction
   const currentUser = req.user!;
 
   try {
-    // 1. Validate due date is in the future
+    // Validate target due date
     const parsedDueDate = new Date(dueDate);
     if (isNaN(parsedDueDate.getTime()) || parsedDueDate <= new Date()) {
       throw new ValidationError('due_date must be a future date');
     }
 
-    // 2. Validate Assignee exists and is in the same organization
+    // Ensure assignee belongs to the same tenant organization
     if (assigneeId) {
       const assignee = await prisma.user.findFirst({
         where: { id: assigneeId, organizationId: currentUser.organizationId },
@@ -26,7 +26,7 @@ export const createTask = async (req: Request, res: Response, next: NextFunction
       }
     }
 
-    // 3. Validate Project exists and is in the same organization
+    // Ensure project belongs to the same tenant organization
     if (projectId) {
       const project = await prisma.project.findFirst({
         where: { id: projectId, organizationId: currentUser.organizationId },
@@ -36,7 +36,7 @@ export const createTask = async (req: Request, res: Response, next: NextFunction
       }
     }
 
-    // 4. Create Task
+    // Insert task
     const task = await prisma.task.create({
       data: {
         title,
@@ -59,7 +59,7 @@ export const createTask = async (req: Request, res: Response, next: NextFunction
       },
     });
 
-    // 5. Invalidate assignee's task cache
+    // Clear assignee task list cache
     if (assigneeId) {
       await invalidateTasksCache(assigneeId);
     }
@@ -86,20 +86,8 @@ export const listTasks = async (req: Request, res: Response, next: NextFunction)
   const skip = (page - 1) * limit;
 
   try {
-    // Determine if we should attempt a Redis cache hit
-    // Cache target is: clean, un-paginated and un-filtered task lists for a single assignee
-    const isCacheableQuery = 
-      assigneeId && 
-      !status && 
-      !priority && 
-      page === 1 && 
-      limit >= 50; // Let's cache the full list and serve from cache if requested!
-    
-    // In our UI, we will fetch the full list of assignee's tasks to display in the Kanban board.
-    // If it's a call for the Kanban board (which usually fetches all assignee tasks or organization tasks),
-    // we can check if it's cached!
-    // To support general dashboard loads, let's cache when querying for a single assignee's tasks without filters.
-    const isBaseAssigneeQuery = assigneeId && !status && !priority && page === 1 && limit === 100; // Let's say page=1, limit=100 is our full fetch
+    // Base assignee queries (limit=100, page=1, no filters) are cache targets for the Kanban board
+    const isBaseAssigneeQuery = assigneeId && !status && !priority && page === 1 && limit === 100;
 
     if (isBaseAssigneeQuery) {
       const cachedTasks = await getTasksCache(assigneeId!);
@@ -114,22 +102,6 @@ export const listTasks = async (req: Request, res: Response, next: NextFunction)
       }
     }
 
-    // Build Prisma query filters
-    const whereClause: any = {
-      organizationId: currentUser.organizationId,
-    };
-
-    if (assigneeId) {
-      whereClause.assigneeId = assigneeId;
-    }
-    if (status) {
-      whereClause.status = status;
-    }
-    if (priority) {
-      whereClause.priority = priority;
-    }
-
-    // Execute queries
     const [tasks, total] = await prisma.$transaction([
       prisma.task.findMany({
         where: whereClause,
@@ -150,7 +122,6 @@ export const listTasks = async (req: Request, res: Response, next: NextFunction)
       prisma.task.count({ where: whereClause }),
     ]);
 
-    // Save to Redis if this was a base assignee query (cacheable)
     if (isBaseAssigneeQuery && tasks.length > 0) {
       await setTasksCache(assigneeId!, tasks);
     }
@@ -197,17 +168,15 @@ export const updateTask = async (req: Request, res: Response, next: NextFunction
   const { title, description, priority, assigneeId, projectId, dueDate, status } = req.body;
 
   try {
-    // 1. Enforce MEMBER restriction: MEMBER can ONLY update status
+    // Members can only update their own status
     if (currentUser.role === Role.MEMBER) {
       const keys = Object.keys(req.body).filter(k => req.body[k] !== undefined);
       const containsOtherFields = keys.some(k => k !== 'status');
-      
       if (containsOtherFields) {
         throw new ForbiddenError('Members can only update the status of their assigned tasks');
       }
     }
 
-    // 2. Validate due date if provided
     let parsedDueDate = existingTask.dueDate;
     if (dueDate !== undefined) {
       parsedDueDate = new Date(dueDate);
@@ -216,7 +185,6 @@ export const updateTask = async (req: Request, res: Response, next: NextFunction
       }
     }
 
-    // 3. Validate assignee if changed
     if (assigneeId !== undefined && assigneeId !== existingTask.assigneeId) {
       if (assigneeId !== null) {
         const assignee = await prisma.user.findFirst({
@@ -228,7 +196,6 @@ export const updateTask = async (req: Request, res: Response, next: NextFunction
       }
     }
 
-    // 4. Validate project if changed
     if (projectId !== undefined && projectId !== existingTask.projectId) {
       if (projectId !== null) {
         const project = await prisma.project.findFirst({
@@ -240,21 +207,17 @@ export const updateTask = async (req: Request, res: Response, next: NextFunction
       }
     }
 
-    // 5. Validate status transition
     if (status !== undefined && status !== existingTask.status) {
-      // Validate transition logic
       if (!isValidTransition(existingTask.status, status)) {
         throw new ValidationError(`Invalid status transition from ${existingTask.status} to ${status}`);
       }
 
-      // Validate transition authorization: "Only the assignee or a MANAGER can advance a task's status"
-      // ADMIN also has full control. So we reject if the user is a MEMBER but NOT the assignee!
+      // Check transition permissions
       if (currentUser.role === Role.MEMBER && existingTask.assigneeId !== currentUser.id) {
         throw new ForbiddenError("Only the task's assignee can advance its status");
       }
     }
 
-    // Capture old assignee for cache invalidation
     const oldAssigneeId = existingTask.assigneeId;
 
     // 6. Update in database
@@ -279,12 +242,10 @@ export const updateTask = async (req: Request, res: Response, next: NextFunction
       },
     });
 
-    // 7. Invalidate caches
-    // Invalidate old assignee's cache
+    // Clear old/new assignee cache keys
     if (oldAssigneeId) {
       await invalidateTasksCache(oldAssigneeId);
     }
-    // If assignee changed, invalidate new assignee's cache too!
     if (assigneeId && assigneeId !== oldAssigneeId) {
       await invalidateTasksCache(assigneeId);
     }

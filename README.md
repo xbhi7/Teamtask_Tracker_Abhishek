@@ -1,47 +1,48 @@
-# TeamTask Tracker System
+# TeamTask Tracker
 
-A robust, enterprise-grade team task tracking platform. The system is designed to provide secure team space collaboration under strict Role-Based Access Control (RBAC), multi-level tenant isolation, performance optimizations using relational PostgreSQL indexes and Redis list-caching, and token-theft protected JWT Authentication.
+A multi-tenant task tracking application featuring role-based access control (RBAC), database indexing optimizations, Redis list caching, and token-rotating JWT authentication. 
 
-This project delivers both a **TypeScript + Express REST API** and a **Vite + React Single Page Application** styled with a premium dark-mode glassmorphic Tailwind CSS design.
+The project is configured as a monorepo containing a Node.js + Express backend and a React + Vite frontend, containerized with Docker Compose.
 
 ---
 
-## ⚡ Quick Start: Docker Compose
+## Quick Start: Docker Compose
 
-The entire network is orchestrated using Docker Compose. The reviewer can spin up the relational database, cache store, API backend, and React hot-reloaded frontend in a single step with no manual configuration.
+The application stack is managed using Docker Compose, which configures the database, caching layer, API backend, and hot-reloading frontend.
 
 ### Prerequisites
-Make sure you have [Docker](https://docs.docker.com/get-docker/) and [Docker Compose](https://docs.docker.com/compose/install/) installed.
+- [Docker](https://docs.docker.com/get-docker/)
+- [Docker Compose](https://docs.docker.com/compose/install/)
 
 ### Start the Services
-Run the following command in the root directory of the project:
+Run the following command in the project root:
 ```bash
 docker compose up --build
 ```
 
-This single command will:
-1. Boot a **PostgreSQL** database service (`postgres`) and execute health checks.
-2. Boot a **Redis** caching service (`redis`) and verify status.
-3. Build and launch the **Backend API** on `http://localhost:5002`.
-   - On boot, the backend automatically applies database migrations and runs a seeding script to populate testing accounts and initial boards.
-4. Build and launch the **React Frontend** on `http://localhost:3000`.
+This command provisions the following services:
+1. **PostgreSQL** (`postgres`): The relational database. Migrations and seed data are applied automatically on startup.
+2. **Redis** (`redis`): The cache store.
+3. **Backend API** (`backend`): Express server listening on `http://localhost:5002`.
+4. **React Frontend** (`frontend`): Vite application running on `http://localhost:3000`.
 
-### 👥 Test Accounts (Seeded Out-of-the-Box)
-To inspect role restrictions and board features immediately, log in with the following seeded accounts:
+### Test Accounts
+The database seeding script configures one test organization ("Acme Corp") and the following users:
 
 | Role | Email | Password | Allowed Capabilities |
 | :--- | :--- | :--- | :--- |
-| **ADMIN** | `admin@acme.com` | `AdminPass123!` | Full control. Manage users, projects, tasks. |
-| **MANAGER** | `manager@acme.com` | `ManagerPass123!` | Create/edit tasks, assign members, create projects. Cannot manage users. |
-| **MEMBER 1** | `member1@acme.com` | `MemberPass123!` | View and update only their assigned tasks. |
-| **MEMBER 2** | `member2@acme.com` | `MemberPass123!` | View and update only their assigned tasks. |
+| **ADMIN** | `admin@acme.com` | `AdminPass123!` | Full organization management (users, projects, tasks). |
+| **MANAGER** | `manager@acme.com` | `ManagerPass123!` | Project and task CRUD, assign members. Cannot manage users. |
+| **MEMBER 1** | `member1@acme.com` | `MemberPass123!` | View and update status of tasks assigned directly to them. |
+| **MEMBER 2** | `member2@acme.com` | `MemberPass123!` | View and update status of tasks assigned directly to them. |
 
 ---
 
-## 🏗️ Architecture & Database Design
+## Database Architecture & Design
 
 ### Schema Overview
-The database uses a clean, relational structure built in PostgreSQL. Below is the written description of the entities and their relationships:
+
+The database relationships are structured around strict multi-tenant isolation keyed by `organizationId`:
 
 ```mermaid
 erDiagram
@@ -56,84 +57,80 @@ erDiagram
     PROJECT ||--o{ TASK : "groups"
 ```
 
-1. **Organization (`organizations`)**: The primary multitenant boundary. All users, projects, and tasks strictly belong to an organization.
-2. **User (`users`)**: Represents team members. Has an access role (`ADMIN`, `MANAGER`, or `MEMBER`) and links to their organization.
-3. **Project (`projects`)**: Scopes tasks into distinct functional categories or initiatives.
-4. **Task (`tasks`)**: Represents tracked units of work, containing `title` (required), `description`, `priority` (`LOW`, `MEDIUM`, `HIGH`), `status` (`TODO`, `IN_PROGRESS`, `IN_REVIEW`, `DONE`, `BLOCKED`), `dueDate`, `assigneeId`, and `projectId`.
-5. **RefreshToken (`refresh_tokens`)**: Secures user sessions, tracking rotating refresh token records and revocation statuses.
+1. **Organization (`organizations`)**: Primary boundary for tenant isolation.
+2. **User (`users`)**: Accounts scoped to an organization with a designated role (`ADMIN`, `MANAGER`, or `MEMBER`).
+3. **Project (`projects`)**: Category groupings for tasks.
+4. **Task (`tasks`)**: Work units containing metadata, priority (`LOW`, `MEDIUM`, `HIGH`), status (`TODO`, `IN_PROGRESS`, `IN_REVIEW`, `DONE`, `BLOCKED`), `dueDate`, and relational keys.
+5. **RefreshToken (`refresh_tokens`)**: Tracks rotating user sessions.
 
-### 📈 Database Indexing Decisions
-To guarantee rapid response times under high throughput, we have added target indexes in our Prisma schema:
-
-1. **Single-Field Index on `Task(status)`**: Essential for dashboards like the Kanban Board which filter and group tasks by their workflow status. Without this index, PostgreSQL would execute a slow table scan as task numbers grow.
-2. **Single-Field Index on `Task(assigneeId)`**: Essential for role-based queries. The most common query in the platform is a Member listing their assigned tasks. This index ensures rapid record retrieval.
-3. **Single-Field Index on `Task(dueDate)`**: Speeds up the analytics queries calculating overdue task boundaries (`dueDate < NOW()`).
-4. **Single-Field Index on `Task(organizationId)`**: Protects multitenancy boundaries. Every query in the API is restricted by the user's `organizationId`. Keeping this field indexed ensures that queries are quickly isolated to their correct tenant group.
-
----
-
-## 🔒 JWT Authentication & Refresh Token Rotation (RTR)
-
-We implement state-of-the-art **Refresh Token Rotation (RTR)** to secure API endpoints:
-- On login, users receive a short-lived `accessToken` (15m) and a long-lived `refreshToken` (7d).
-- Access tokens are stored in-memory in the React app, and the refresh token is stored in `localStorage` for session restoration.
-- Whenever a client requests a new access token using a refresh token (either on page reload or when the access token is close to expiry), the backend executes a rotation:
-  1. It validates the refresh token.
-  2. It revokes the old refresh token in the database (`isRevoked: true`).
-  3. It generates and saves a completely new access token and new refresh token, returning them to the client.
-- **Token Theft Protection**: If the backend detects a refresh token that has **already** been marked as revoked (indicating that a malicious actor has intercepted the token and attempted to reuse it), the system **triggers a full security breach protocol**. It automatically revokes **ALL active refresh tokens associated with that user**, forcing all active sessions to log out immediately and requiring the user to re-authenticate.
+### Indexing Decisions
+To ensure consistent query response times as data sizes scale, the following database indexes are defined in `schema.prisma`:
+- **`Task(status)`**: Optimizes status filtering and groupings on the Kanban Board.
+- **`Task(assigneeId)`**: Speeds up retrieval of dashboard lists for specific assignees.
+- **`Task(dueDate)`**: Optimizes queries evaluating overdue task thresholds.
+- **`Task(organizationId)`**: Enforces tenant-isolation performance, ensuring multitenant filters do not result in full table scans.
 
 ---
 
-## 🚀 Redis Caching & Invalidation Strategy
+## Authentication & Refresh Token Rotation (RTR)
 
-### Caching Strategy
-We cache the complete task lists of individual assignees in Redis under the key `tasks:assignee:<assigneeId>`.
-- When a user (especially a `MEMBER`) logs in and requests their task board, the system intercepts the database query and reads directly from Redis.
-- If it is a cache hit, the task list is returned in **sub-millisecond speed** directly from RAM, reducing database CPU load.
-- If it is a cache miss, the data is fetched from PostgreSQL, written to Redis with a **1-hour Time-to-Live (TTL)**, and then returned.
-
-### Cache Invalidation Strategy
-To ensure that users never see stale board information, we implement a targeted, transactional cache invalidation strategy in our controller actions:
-1. **On Task Creation**: If an assignee is designated, we instantly clear the cache for that assignee: `redisClient.del("tasks:assignee:<assigneeId>")`.
-2. **On Task Deletion**: We instantly clear the cache of the deleted task's assignee.
-3. **On Task Update (Status or Details change)**: We instantly clear the assignee's cache.
-4. **On Task Reassignment (Assignee change)**: This is a crucial edge case. If a task is reassigned from `User A` to `User B`, the cache for **both User A (the old assignee) and User B (the new assignee)** is invalidated. This guarantees that User A's board instantly reflects the removal and User B's board instantly reflects the addition.
+The API enforces Refresh Token Rotation (RTR) to protect user sessions:
+- Authenticated clients receive a short-lived `accessToken` (15 minutes, stored in-memory) and a long-lived `refreshToken` (7 days, stored in `localStorage`).
+- Exchanging a refresh token for a new access token triggers token rotation:
+  1. The API validates the submitted refresh token.
+  2. The submitted token is revoked (`isRevoked: true`).
+  3. A new access token and a new refresh token are generated, saved, and returned.
+- **Token Theft Defense**: If a client submits a refresh token that has already been marked as revoked (indicating a potential interception/replay attack), the API revokes all active refresh tokens associated with that user. This forces all active sessions to log out immediately.
 
 ---
 
-## 🛡️ Role-Based Access Control (RBAC) Middleware
+## Redis Caching & Invalidation Strategy
 
-RBAC is strictly enforced at the **routing and middleware layer** of the API, rather than cluttering core controllers:
-- `requireRoles(roles)`: Intercepts endpoint requests and validates that the decoded JWT user role is within the permitted array. For example, creating tasks is restricted to `[ADMIN, MANAGER]`.
-- `authorizeTaskAccess`: A custom object-level access control middleware that runs on individual task requests (e.g. `/api/tasks/:id`):
-  1. It queries the task.
-  2. It verifies that the task belongs to the user's organization (tenant isolation).
-  3. If the user is a `MEMBER`, it verifies that the task's `assigneeId` matches the user's `id`. If not, it throws a `403 Forbidden` error.
-- **Field-Level Gating**: During updates, the controller evaluates the user's role. If a `MEMBER` attempts to update fields other than `status` (such as `title` or `dueDate`), the request is rejected. Furthermore, the status transition validation verifies that "Only the assignee or a MANAGER/ADMIN can advance a task's status".
+### Caching Flow
+To minimize database reads, task lists for individual assignees are cached under `tasks:assignee:<assigneeId>` keys:
+- The controller checks the cache for base task queries (e.g., retrieving lists for a single assignee without filtering parameters).
+- **Cache Hit**: Returns the parsed JSON payload directly from Redis.
+- **Cache Miss**: Queries the PostgreSQL database, saves the result to Redis with a **1-hour TTL**, and returns the response.
+
+### Invalidation Triggers
+The cache is invalidated during database write operations to prevent stale client states:
+1. **Creation**: Invalidates the cache for the task assignee.
+2. **Deletion**: Invalidates the cache for the task assignee.
+3. **Update**: Invalidates the cache for the task assignee.
+4. **Re-assignment**: If a task's assignee changes, the caches for both the previous and newly assigned users are cleared.
 
 ---
 
-## 🧪 Automated Testing
+## Role-Based Access Control (RBAC)
 
-We have built a comprehensive integration test suite using **Jest** and **Supertest** to test critical flows.
+Access controls are managed via centralized middleware rather than inline controller checks:
+- `requireRoles(roles)`: Rejects requests if the parsed JWT user role is not within the specified array (e.g., restricting task creation to `ADMIN` and `MANAGER`).
+- `authorizeTaskAccess`: Verifies that:
+  1. The requested task belongs to the user's organization.
+  2. If the user is a `MEMBER`, the task's `assigneeId` matches the user's `id`.
+- **Field Gating**: If a `MEMBER` attempts to update task attributes other than `status` (such as `title`, `priority`, or `dueDate`), the request is rejected with a `403 Forbidden` response.
 
-### Running Tests
-To run the automated tests inside the backend workspace, open a new shell and execute:
+---
+
+## Integration Testing
+
+An integration test suite using **Jest** and **Supertest** validates auth and permission boundaries.
+
+### Running the Tests
+Execute the tests inside the backend container container:
 ```bash
 docker compose exec backend npm run test
 ```
 
-This will run the integration tests which verify:
-1. **Authentication RTR**: Token issuance, rotation, and revocation. It verifies that reusing a revoked refresh token successfully revokes all tokens for that user.
-2. **RBAC Gating**: Verifies that members are blocked from creating tasks, and that task status transitions strictly follow the state-machine paths (e.g., `TODO -> IN_PROGRESS` succeeds, `TODO -> DONE` is blocked).
+The test cases cover:
+1. **Authentication RTR**: Token rotation, database revocation, and session invalidation on token reuse detection.
+2. **RBAC Rules**: Verification that `MEMBER` accounts are restricted from task creation, project creation, and illegal task status transitions (e.g. attempting to jump from `TODO` straight to `DONE`).
 
 ---
 
-## 🔮 Roadmap: Future Enhancements
+## Future Enhancements Roadmap
 
-Given more time, we would implement the following high-priority features:
-1. **Real-time Synchronization (SSE/WebSockets)**: Establish an event-driven network. Whenever a MANAGER changes a task status or assignee, a notification is sent instantly to the assignee's screen.
-2. **Comprehensive Frontend Unit & Component Tests**: Add Cypress/Playwright E2E tests and React Testing Library suites to verify drag-and-drop feedback and role-based board views.
-3. **Advanced Activity Logs**: Introduce a `TaskActivity` model tracking a chronological history of edits (e.g., "Bob changed status from IN_PROGRESS to IN_REVIEW on May 29").
-4. **Soft Deletes**: Implement soft deletes on tasks and users to preserve analytics histories and prevent data loss.
+1. **Real-time Updates**: Implement WebSockets or Server-Sent Events (SSE) to sync board states across clients instantly.
+2. **E2E Testing**: Add Cypress or Playwright test suites to validate drag-and-drop feedback loops and visual layouts.
+3. **Audit Logging**: Add a `TaskActivity` ledger to track transition history and editor identities.
+4. **Soft Deletes**: Implement flag-based deletions to maintain historic analytics integrity.

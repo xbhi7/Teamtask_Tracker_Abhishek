@@ -8,7 +8,6 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
   const { email, password, firstName, lastName, role, organizationId, organizationName } = req.body;
 
   try {
-    // 1. Check if email already exists
     const existingUser = await prisma.user.findUnique({
       where: { email },
     });
@@ -17,7 +16,7 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
       throw new ConflictError('Email address is already registered');
     }
 
-    // 2. Resolve organization
+    // Resolve or provision target organization
     let resolvedOrgId = organizationId;
 
     if (!resolvedOrgId) {
@@ -38,10 +37,9 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
       }
     }
 
-    // 3. Hash Password
     const passwordHash = await bcrypt.hash(password, 10);
 
-    // 4. Create User
+    // Register member in database
     const userRole = role || 'MEMBER';
     const user = await prisma.user.create({
       data: {
@@ -73,7 +71,6 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
   const { email, password } = req.body;
 
   try {
-    // 1. Find user and include organization details
     const user = await prisma.user.findUnique({
       where: { email },
     });
@@ -82,13 +79,13 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
       throw new UnauthorizedError('Invalid email or password');
     }
 
-    // 2. Compare passwords
+    // Verify credentials
     const isPasswordMatch = await bcrypt.compare(password, user.passwordHash);
     if (!isPasswordMatch) {
       throw new UnauthorizedError('Invalid email or password');
     }
 
-    // 3. Generate tokens
+    // Issue authentication keys
     const tokenPayload = {
       id: user.id,
       email: user.email,
@@ -99,7 +96,7 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
     const accessToken = generateAccessToken(tokenPayload);
     const refreshToken = generateRefreshToken(tokenPayload);
 
-    // 4. Save refresh token to DB
+    // Record session refresh token
     const decodedRefresh = verifyRefreshToken(refreshToken) as any;
     const expiresAt = new Date(decodedRefresh.exp * 1000);
 
@@ -137,7 +134,6 @@ export const refresh = async (req: Request, res: Response, next: NextFunction) =
   }
 
   try {
-    // 1. Verify token structure/expiry using JWT
     let payload;
     try {
       payload = verifyRefreshToken(refreshToken);
@@ -145,16 +141,14 @@ export const refresh = async (req: Request, res: Response, next: NextFunction) =
       throw new UnauthorizedError('Invalid or expired refresh token');
     }
 
-    // 2. Query the refresh token from database
     const dbToken = await prisma.refreshToken.findUnique({
       where: { token: refreshToken },
     });
 
-    // 3. RTR Theft Detection: If token is not found or is already revoked
+    // Theft detection: if token is already revoked, invalidate all user sessions
     if (!dbToken || dbToken.isRevoked || dbToken.expiresAt < new Date()) {
       if (dbToken && dbToken.isRevoked) {
         console.warn(`🚨 REUSE DETECTED: Refresh token was already used! Revoking all sessions for user ${payload.id}`);
-        // Revoke all tokens for this user!
         await prisma.refreshToken.updateMany({
           where: { userId: payload.id },
           data: { isRevoked: true },
@@ -163,13 +157,12 @@ export const refresh = async (req: Request, res: Response, next: NextFunction) =
       throw new UnauthorizedError('Refresh token invalid, revoked, or expired');
     }
 
-    // 4. Rotate: Revoke the current token
+    // Invalidate the consumed token (RTR rotation)
     await prisma.refreshToken.update({
       where: { id: dbToken.id },
       data: { isRevoked: true },
     });
 
-    // 5. Generate new access & refresh tokens
     const tokenPayload = {
       id: payload.id,
       email: payload.email,
@@ -180,7 +173,6 @@ export const refresh = async (req: Request, res: Response, next: NextFunction) =
     const newAccessToken = generateAccessToken(tokenPayload);
     const newRefreshToken = generateRefreshToken(tokenPayload);
 
-    // 6. Save the new refresh token
     const decodedRefresh = verifyRefreshToken(newRefreshToken) as any;
     const expiresAt = new Date(decodedRefresh.exp * 1000);
 

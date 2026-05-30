@@ -5,10 +5,7 @@ export const getAnalytics = async (req: Request, res: Response, next: NextFuncti
   const currentUser = req.user!;
 
   try {
-    // Run a high-performance raw SQL query utilizing CTEs and aggregations to calculate:
-    // 1. Overdue task counts per user (tasks where status != 'DONE' and due_date < now())
-    // 2. Average completion time in hours (difference between updated_at and created_at for 'DONE' tasks)
-    // All scoped strictly to the current organization for multitenancy safety.
+    // Fetch overdue counts and average task completion durations per user
     const analytics = await prisma.$queryRawUnsafe<any[]>(
       `
       WITH overdue_cte AS (

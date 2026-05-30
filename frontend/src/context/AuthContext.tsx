@@ -110,19 +110,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return headers;
     };
 
-    // 1. Fire original request
+    // Execute original request
     let response = await fetch(`${API_URL}${endpoint}`, {
       ...options,
       headers: getHeaders(currentToken),
     });
 
-    // 2. Intercept 401 and try Refresh Token Rotation
+    // Handle access token expiry via RTR
     if (response.status === 401) {
       console.log('🔄 Access Token expired, attempting refresh rotation...');
       const renewedToken = await refreshTokens();
       
       if (renewedToken) {
-        // Retry the original request with the new access token
+        // Retry using the rotated token
         response = await fetch(`${API_URL}${endpoint}`, {
           ...options,
           headers: getHeaders(renewedToken),
