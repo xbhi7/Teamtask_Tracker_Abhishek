@@ -1,0 +1,568 @@
+openapi: 3.0.3
+info:
+  title: TeamTask Tracker API
+  description: |
+    REST API for a team-based task tracker with authentication, role-based access control (RBAC), and containerized Redis caching.
+    
+    ### Test Accounts (Seeded automatically)
+    - **ADMIN**: `admin@acme.com` / `AdminPass123!`
+    - **MANAGER**: `manager@acme.com` / `ManagerPass123!`
+    - **MEMBER**: `member1@acme.com` / `MemberPass123!`
+  version: 1.0.0
+servers:
+  - url: http://localhost:5002/api
+    description: Local Docker Compose development server
+
+paths:
+  /auth/register:
+    post:
+      summary: Register a new user
+      description: Registers a new user. If organizationName is provided, a new Organization is created and the user is registered as its ADMIN. If organizationId is provided, the user joins that organization.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+                - password
+                - firstName
+                - lastName
+              properties:
+                email:
+                  type: string
+                  format: email
+                  example: user@acme.com
+                password:
+                  type: string
+                  minLength: 6
+                  example: Password123!
+                firstName:
+                  type: string
+                  example: John
+                lastName:
+                  type: string
+                  example: Doe
+                role:
+                  type: string
+                  enum: [ADMIN, MANAGER, MEMBER]
+                  default: MEMBER
+                  example: MEMBER
+                organizationId:
+                  type: string
+                  format: uuid
+                  example: b40e2cf6-9284-4061-ab3f-a36c84c17290
+                organizationName:
+                  type: string
+                  example: Acme Corp
+      responses:
+        '201':
+          description: User registered successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Email already registered
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /auth/login:
+    post:
+      summary: Log in with email and password
+      description: Authenticates user credentials and issues a short-lived Access Token and a long-lived Refresh Token.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+                - password
+              properties:
+                email:
+                  type: string
+                  format: email
+                  example: admin@acme.com
+                password:
+                  type: string
+                  example: AdminPass123!
+      responses:
+        '200':
+          description: Authentication successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user:
+                    $ref: '#/components/schemas/UserResponse'
+                  accessToken:
+                    type: string
+                    example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+                  refreshToken:
+                    type: string
+                    example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+        '401':
+          description: Invalid email or password
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /auth/refresh:
+    post:
+      summary: Rotate Access and Refresh Tokens (RTR)
+      description: Verifies the provided refresh token, invalidates it, and rotates a new set of Access and Refresh tokens. If token reuse is detected, all tokens for the user are immediately revoked.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - refreshToken
+              properties:
+                refreshToken:
+                  type: string
+                  example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+      responses:
+        '200':
+          description: Tokens rotated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  accessToken:
+                    type: string
+                    example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+                  refreshToken:
+                    type: string
+                    example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+        '401':
+          description: Invalid, expired, or reused refresh token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /auth/logout:
+    post:
+      summary: Revoke a session
+      description: Invalidates the provided refresh token, logging the user out.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - refreshToken
+              properties:
+                refreshToken:
+                  type: string
+                  example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+      responses:
+        '204':
+          description: Logout successful
+
+  /tasks:
+    get:
+      summary: List tasks inside the organization
+      description: Retrieves a paginated and filtered list of tasks. Members can only view tasks assigned to them (the assigneeId parameter is forced to their own ID).
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          description: Page number for pagination
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: limit
+          in: query
+          description: Page limit for pagination
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 10
+        - name: status
+          in: query
+          description: Filter tasks by workflow status
+          schema:
+            type: string
+            enum: [TODO, IN_PROGRESS, IN_REVIEW, DONE, BLOCKED]
+        - name: priority
+          in: query
+          description: Filter tasks by priority tier
+          schema:
+            type: string
+            enum: [LOW, MEDIUM, HIGH]
+        - name: assigneeId
+          in: query
+          description: Filter tasks by assignee UUID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Tasks list loaded successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tasks:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Task'
+                  page:
+                    type: integer
+                  limit:
+                    type: integer
+                  total:
+                    type: integer
+                  cached:
+                    type: boolean
+                    description: True if response was served from Redis cache
+        '401':
+          description: Access token invalid or expired
+        '403':
+          description: Unauthorized access roles
+
+    post:
+      summary: Create a task (Admin/Manager only)
+      description: Creates a new task in the organization.
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - title
+                - dueDate
+              properties:
+                title:
+                  type: string
+                  example: Deploy Redis Service
+                description:
+                  type: string
+                  example: Create Redis container in Docker Compose
+                priority:
+                  type: string
+                  enum: [LOW, MEDIUM, HIGH]
+                  default: MEDIUM
+                  example: MEDIUM
+                assigneeId:
+                  type: string
+                  format: uuid
+                  example: b40e2cf6-9284-4061-ab3f-a36c84c17290
+                projectId:
+                  type: string
+                  format: uuid
+                  example: b40e2cf6-9284-4061-ab3f-a36c84c17290
+                dueDate:
+                  type: string
+                  format: date-time
+                  description: Must be a future date
+                  example: '2026-06-15T12:00:00Z'
+      responses:
+        '201':
+          description: Task created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Task'
+        '400':
+          description: Validation error (e.g. due_date must be in the future)
+        '401':
+          description: Unauthorized
+
+  /tasks/{id}:
+    get:
+      summary: Retrieve task specifications
+      description: Fetches details of a single task. Members can only access if it is assigned to them.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Task details retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Task'
+        '403':
+          description: Forbidden (Not assigned to member)
+        '404':
+          description: Task not found
+
+    patch:
+      summary: Update task properties (RBAC guarded)
+      description: |
+        Updates task fields.
+        - **MEMBER**: Can only update the `status` field.
+        - **MANAGER/ADMIN**: Can update all fields.
+        - **Status transition validation** is strictly checked server-side:
+          - `TODO` -> `IN_PROGRESS` -> `IN_REVIEW` -> `DONE`
+          - `BLOCKED` (reachable from any active state)
+        - **Status transition auth**: Only the assignee or a MANAGER/ADMIN can change the status.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title:
+                  type: string
+                description:
+                  type: string
+                priority:
+                  type: string
+                  enum: [LOW, MEDIUM, HIGH]
+                status:
+                  type: string
+                  enum: [TODO, IN_PROGRESS, IN_REVIEW, DONE, BLOCKED]
+                assigneeId:
+                  type: string
+                  format: uuid
+                  nullable: true
+                projectId:
+                  type: string
+                  format: uuid
+                  nullable: true
+                dueDate:
+                  type: string
+                  format: date-time
+      responses:
+        '200':
+          description: Task updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Task'
+        '400':
+          description: Invalid transition or date validation error
+        '403':
+          description: Unauthorized fields or invalid assignee auth
+
+    delete:
+      summary: Delete a task (Admin/Manager only)
+      description: Removes a task permanently and clears related Redis caches.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Task deleted successfully
+        '403':
+          description: Forbidden
+
+  /projects:
+    get:
+      summary: List organization projects
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Projects list loaded
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Project'
+
+    post:
+      summary: Create a project (Admin/Manager only)
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - name
+              properties:
+                name:
+                  type: string
+                  example: Devops Pipeline Scaling
+                description:
+                  type: string
+                  example: Optimize Docker and compose workflows
+      responses:
+        '201':
+          description: Project created successfully
+
+  /projects/members:
+    get:
+      summary: List organization members
+      description: Lists all users belonging to the active user's organization (useful for assigning tasks).
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Users list loaded
+
+  /analytics:
+    get:
+      summary: Retrieve task statistics (Bonus Feature)
+      description: Runs a raw aggregation query using PostgreSQL CTEs to return overdue task counts and average completion times (in hours) per user.
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Performance analytics loaded
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/UserAnalytics'
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    UserResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+        firstName:
+          type: string
+        lastName:
+          type: string
+        role:
+          type: string
+          enum: [ADMIN, MANAGER, MEMBER]
+        organizationId:
+          type: string
+          format: uuid
+
+    Task:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        description:
+          type: string
+        priority:
+          type: string
+          enum: [LOW, MEDIUM, HIGH]
+        status:
+          type: string
+          enum: [TODO, IN_PROGRESS, IN_REVIEW, DONE, BLOCKED]
+        assigneeId:
+          type: string
+          format: uuid
+          nullable: true
+        projectId:
+          type: string
+          format: uuid
+          nullable: true
+        dueDate:
+          type: string
+          format: date-time
+        organizationId:
+          type: string
+          format: uuid
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    Project:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: string
+
+    UserAnalytics:
+      type: object
+      properties:
+        userId:
+          type: string
+          format: uuid
+        email:
+          type: string
+        firstName:
+          type: string
+        lastName:
+          type: string
+        role:
+          type: string
+        overdueCount:
+          type: integer
+        avgCompletionTimeHours:
+          type: number
+
+    ErrorResponse:
+      type: object
+      properties:
+        status:
+          type: integer
+          example: 400
+        code:
+          type: string
+          example: VALIDATION_ERROR
+        message:
+          type: string
+          example: due_date must be a future date
