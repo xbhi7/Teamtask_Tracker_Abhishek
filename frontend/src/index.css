@@ -1,0 +1,89 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    background-color: #050508;
+    background-image: 
+      radial-gradient(at 0% 0%, rgba(59, 102, 255, 0.15) 0px, transparent 50%),
+      radial-gradient(at 100% 0%, rgba(147, 51, 234, 0.15) 0px, transparent 50%),
+      radial-gradient(at 50% 100%, rgba(37, 99, 235, 0.08) 0px, transparent 50%);
+    background-attachment: fixed;
+  }
+
+  /* Custom Scrollbar */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: rgba(255, 255, 255, 0.02);
+    border-radius: 10px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.12);
+    border-radius: 10px;
+    transition: background 0.2s;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(59, 102, 255, 0.4);
+  }
+}
+
+@layer components {
+  /* Glassmorphism panel styling */
+  .glass-panel {
+    @apply bg-dark-900/60 backdrop-blur-md border border-white/5 shadow-2xl;
+  }
+  
+  .glass-panel-hover {
+    @apply transition-all duration-300 hover:bg-dark-900/85 hover:border-white/10 hover:shadow-brand-500/10 hover:shadow-lg;
+  }
+
+  .glass-card {
+    @apply bg-dark-950/40 backdrop-blur-sm border border-white/5 rounded-xl shadow-md transition-all duration-300;
+  }
+
+  .glass-card:hover {
+    @apply border-brand-500/20 bg-dark-950/60 shadow-brand-500/5 shadow-xl;
+  }
+
+  .glass-input {
+    @apply bg-dark-900/40 border border-white/10 rounded-lg px-4 py-2 text-dark-50 placeholder-dark-400 focus:outline-none focus:ring-2 focus:ring-brand-500/50 focus:border-brand-500 transition-all duration-200;
+  }
+
+  .btn-primary {
+    @apply bg-brand-600 hover:bg-brand-500 text-white font-medium px-5 py-2.5 rounded-lg shadow-lg shadow-brand-600/20 active:scale-95 transition-all duration-150 flex items-center justify-center gap-2;
+  }
+
+  .btn-secondary {
+    @apply bg-white/5 hover:bg-white/10 border border-white/10 text-dark-100 font-medium px-5 py-2.5 rounded-lg active:scale-95 transition-all duration-150 flex items-center justify-center gap-2;
+  }
+
+  .btn-danger {
+    @apply bg-red-600 hover:bg-red-500 text-white font-medium px-5 py-2.5 rounded-lg shadow-lg shadow-red-600/20 active:scale-95 transition-all duration-150 flex items-center justify-center gap-2;
+  }
+}
+
+/* Custom glow animations for status badges */
+.status-glow-todo {
+  box-shadow: 0 0 10px rgba(161, 161, 176, 0.15);
+}
+.status-glow-progress {
+  box-shadow: 0 0 10px rgba(59, 102, 255, 0.2);
+}
+.status-glow-review {
+  box-shadow: 0 0 10px rgba(234, 179, 8, 0.2);
+}
+.status-glow-done {
+  box-shadow: 0 0 10px rgba(34, 197, 94, 0.2);
+}
+.status-glow-blocked {
+  box-shadow: 0 0 10px rgba(239, 68, 68, 0.2);
+}
+
+/* Kanban column min height adjustment */
+.kanban-column-list {
+  min-height: calc(100vh - 280px);
+}
